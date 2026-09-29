@@ -5,8 +5,8 @@ name: Build and Push acme.sh+docker-cli Image
 # ─────────────────────────────────────────────
 on:
   schedule:
-    # 每天 UTC 02:00（北京时间 10:00）自动运行
-    - cron: "0 2 * * *"
+    # 每周三 UTC 02:00（北京时间 10:00）自动运行
+    - cron: "0 2 * * 3"
   # 允许在 Actions 页面手动触发（调试或强制更新时使用）
   workflow_dispatch:
     inputs:
