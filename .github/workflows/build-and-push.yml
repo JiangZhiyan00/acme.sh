@@ -24,6 +24,8 @@ env:
   UPSTREAM_IMAGE: neilpang/acme.sh:latest
   # 你的目标镜像（从 Secrets 读取用户名）
   TARGET_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/acme.sh
+  # 缓存文件路径
+  DIGEST_CACHE_FILE: .upstream-digest
 
 jobs:
   # ───────────────────────────────────────────
@@ -61,46 +63,25 @@ jobs:
           echo "上游镜像 digest: ${DIGEST}"
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
-      - name: 获取我们上次构建时记录的 digest
+      - name: 恢复上次记录的 digest 缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DIGEST_CACHE_FILE }}
+          # 前缀匹配，自动匹配最近一次保存的缓存
+          key: upstream-digest-${{ github.run_id }}
+          restore-keys: upstream-digest-
+
+      - name: 读取缓存中的 digest
         id: get_current
         run: |
-          # 从全局 env 变量获取目标仓库名（TARGET_IMAGE 不带标签，直接使用）
-          TARGET_REPO="${TARGET_IMAGE}"
-
-          # 尝试从我们自己的镜像的 Label 中读取上次构建所使用的上游 digest
-          # 若镜像不存在或拉取失败，则视为首次构建（返回 "none"）
-          TOKEN=$(curl -s \
-            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${TARGET_REPO}:pull" \
-            | jq -r '.token // empty')
-
-          if [ -z "${TOKEN}" ]; then
-            echo "无法获取 Token，可能是首次构建或目标镜像不存在"
+          if [ -f "${DIGEST_CACHE_FILE}" ]; then
+            RECORDED=$(cat "${DIGEST_CACHE_FILE}")
+            echo "上次记录的上游 digest: ${RECORDED}"
+            echo "digest=${RECORDED}" >> "$GITHUB_OUTPUT"
+          else
+            echo "未找到缓存，视为首次构建"
             echo "digest=none" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
-
-          # 获取 manifest（单平台镜像，直接读取 config digest）
-          CONFIG_DIGEST=$(curl -s \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-            "https://registry-1.docker.io/v2/${TARGET_REPO}/manifests/latest" \
-            | jq -r '.config.digest // empty')
-
-          if [ -z "${CONFIG_DIGEST}" ]; then
-            echo "目标镜像不存在，视为首次构建"
-            echo "digest=none" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # 通过 config digest 拉取镜像元数据，读取我们写入的 Label
-          RECORDED_DIGEST=$(curl -s \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "https://registry-1.docker.io/v2/${TARGET_REPO}/blobs/${CONFIG_DIGEST}" \
-            | jq -r '.config.Labels["org.opencontainers.image.base.digest"] // "none"')
-
-          echo "上次记录的上游 digest: ${RECORDED_DIGEST}"
-          echo "digest=${RECORDED_DIGEST}" >> "$GITHUB_OUTPUT"
 
       - name: 对比 digest，决定是否构建
         id: compare
@@ -144,7 +125,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 设置 Docker Buildx（多平台构建支持）
+      - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v4
 
       - name: 提取元数据（标签、注释）
@@ -162,8 +143,6 @@ jobs:
             org.opencontainers.image.title=acme.sh with Docker CLI
             org.opencontainers.image.description=${{ env.UPSTREAM_IMAGE }} with docker-cli pre-installed
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            # 关键：将上游 digest 写入 Label，下次检查时读取用于对比
-            org.opencontainers.image.base.digest=${{ needs.check-update.outputs.upstream_digest }}
 
       - name: 构建并推送镜像
         uses: docker/build-push-action@v7
@@ -177,6 +156,17 @@ jobs:
           # 启用 GitHub Actions 缓存加速构建
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 将新 digest 写入缓存文件
+        run: |
+          echo "${{ needs.check-update.outputs.upstream_digest }}" > ${{ env.DIGEST_CACHE_FILE }}
+
+      - name: 保存 digest 缓存
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DIGEST_CACHE_FILE }}
+          # 使用 run_id 作为唯一 key，restore-keys 前缀匹配保证下次能找到
+          key: upstream-digest-${{ github.run_id }}
 
       - name: 输出构建摘要
         run: |
