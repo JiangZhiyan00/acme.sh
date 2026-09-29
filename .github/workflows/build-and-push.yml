@@ -64,7 +64,7 @@ jobs:
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
       - name: 恢复上次记录的 digest 缓存
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.DIGEST_CACHE_FILE }}
           # 前缀匹配，自动匹配最近一次保存的缓存
@@ -162,7 +162,7 @@ jobs:
           echo "${{ needs.check-update.outputs.upstream_digest }}" > ${{ env.DIGEST_CACHE_FILE }}
 
       - name: 保存 digest 缓存
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ env.DIGEST_CACHE_FILE }}
           # 使用 run_id 作为唯一 key，restore-keys 前缀匹配保证下次能找到
