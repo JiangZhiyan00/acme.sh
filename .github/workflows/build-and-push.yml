@@ -79,28 +79,13 @@ jobs:
             exit 0
           fi
 
-          # 获取顶层 manifest（多平台镜像返回的是 manifest list / OCI image index）
-          TOP_MANIFEST=$(curl -s \
+          # 获取 manifest（单平台镜像，直接读取 config digest）
+          CONFIG_DIGEST=$(curl -s \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
             -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-            -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-            -H "Accept: application/vnd.oci.image.index.v1+json" \
-            "https://registry-1.docker.io/v2/${TARGET_REPO}/manifests/latest")
-
-          # 判断是否为 manifest list（多平台），若是则取第一个平台的子 manifest
-          if echo "${TOP_MANIFEST}" | jq -e '.manifests' > /dev/null 2>&1; then
-            PLATFORM_DIGEST=$(echo "${TOP_MANIFEST}" | jq -r '.manifests[0].digest')
-            SINGLE_MANIFEST=$(curl -s \
-              -H "Authorization: Bearer ${TOKEN}" \
-              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-              "https://registry-1.docker.io/v2/${TARGET_REPO}/manifests/${PLATFORM_DIGEST}")
-          else
-            SINGLE_MANIFEST="${TOP_MANIFEST}"
-          fi
-
-          CONFIG_DIGEST=$(echo "${SINGLE_MANIFEST}" | jq -r '.config.digest // empty')
+            "https://registry-1.docker.io/v2/${TARGET_REPO}/manifests/latest" \
+            | jq -r '.config.digest // empty')
 
           if [ -z "${CONFIG_DIGEST}" ]; then
             echo "目标镜像不存在，视为首次构建"
@@ -185,8 +170,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          # 同时构建 amd64 和 arm64 两种平台架构
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -203,4 +187,4 @@ jobs:
           echo "| 目标镜像 | \`${{ env.TARGET_IMAGE }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| 上游 digest | \`${{ needs.check-update.outputs.upstream_digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| 构建时间 | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 平台 | linux/amd64, linux/arm64 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 平台 | linux/amd64 |" >> "$GITHUB_STEP_SUMMARY"
